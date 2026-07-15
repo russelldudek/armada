@@ -1,0 +1,23 @@
+{
+  "campaign_state": "live_verified",
+  "live_site": "https://russelldudek.github.io/armada/",
+  "routes_verified": [
+    "index.html",
+    "resume.html",
+    "cover-letter.html",
+    "interview-brief.html",
+    "90-day-plan.html",
+    "outcome-cross-dock.html",
+    "sources.html"
+  ],
+  "official_identity_byte_match": "passed",
+  "live_pdf_byte_match": "passed",
+  "pdf_page_counts": {
+    "resume": 2,
+    "cover_letter": 1,
+    "interview_brief": 3,
+    "entry_plan": 2,
+    "outcome_cross_dock": 1,
+    "public_source_notes": 1
+  }
+}

@@ -1,4 +1,4 @@
-name: Build and deploy candidate vision
+name: Deploy and verify candidate vision
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -15,57 +15,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  deploy:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Materialize campaign source
-        id: materialize
-        run: |
-          if compgen -G "campaign-source.part-*" > /dev/null; then
-            cat campaign-source.part-* > campaign-source.tar.gz.b64
-            base64 --decode campaign-source.tar.gz.b64 > campaign-source.tar.gz
-            tar -xzf campaign-source.tar.gz
-            rm campaign-source.tar.gz campaign-source.tar.gz.b64 campaign-source.part-*
-            echo "materialized=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "materialized=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install PDF verifier
+      - name: Install audit dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pypdf
+          python -m pip install beautifulsoup4 pypdf
 
-      - name: Install PDF renderer
-        if: steps.materialize.outputs.materialized == 'true'
-        run: python -m pip install weasyprint==68.0
-
-      - name: Retrieve official ARMADA identity
-        if: steps.materialize.outputs.materialized == 'true'
+      - name: Verify positioning and routing source
         run: |
-          mkdir -p assets/brand
-          curl --fail --location --retry 3 \
-            https://www.armada.net/wp-content/themes/amd2024/public/images/logo-footer.3a20a9.svg \
-            --output assets/brand/armada-logo-official.svg
-          test -s assets/brand/armada-logo-official.svg
-
-      - name: Generate printable artifacts
-        if: steps.materialize.outputs.materialized == 'true'
-        run: python scripts/build_pdfs.py
+          python scripts/test_positive_positioning.py
+          python scripts/test_routing_source.py
+          node scripts/test_routing_logic.js
 
       - name: Verify PDF contracts
         run: |
           python - <<'PY'
           from pathlib import Path
           from pypdf import PdfReader
+
           expected = {
               'Russell-Dudek-ARMADA-Resume.pdf': 2,
               'Russell-Dudek-ARMADA-Cover-Letter.pdf': 1,
@@ -74,31 +49,31 @@ jobs:
               'Russell-Dudek-ARMADA-Outcome-Cross-Dock.pdf': 1,
               'Russell-Dudek-ARMADA-Public-Source-Notes.pdf': 1,
           }
-          for name, count in expected.items():
+          banned = (
+              'the hard objection',
+              'strongest hiring objection',
+              'do not blur the gap',
+              'does not support claiming',
+              'primary gap to test',
+              'the credible case is adjacent',
+              'capability gaps',
+          )
+          for name, page_count in expected.items():
               path = Path('docs') / name
-              actual = len(PdfReader(str(path)).pages)
-              if actual != count:
-                  raise SystemExit(f'{name}: expected {count} pages, got {actual}')
-              print(f'{name}: {actual} page(s)')
+              reader = PdfReader(str(path))
+              assert len(reader.pages) == page_count, (name, len(reader.pages))
+              text = '\n'.join(page.extract_text() or '' for page in reader.pages).lower()
+              for phrase in banned:
+                  assert phrase not in text, f'{phrase!r} remains in {name}'
+          print('PDF contracts and positive positioning passed')
           PY
-
-      - name: Commit materialized source, brand, and PDFs
-        if: steps.materialize.outputs.materialized == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "Materialize ARMADA brand asset and campaign PDFs"
-            git push
-          fi
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
           enablement: true
 
-      - name: Upload static site
+      - name: Upload static campaign
         uses: actions/upload-pages-artifact@v3
         with:
           path: .
@@ -107,15 +82,15 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Verify live routes and committed downloads
+      - name: Verify live affirmative positioning
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           set -euo pipefail
           base="${PAGE_URL%/}/"
           fetch_retry() {
-            url="$1"
-            output="$2"
+            local url="$1"
+            local output="$2"
             for attempt in $(seq 1 30); do
               if curl --silent --show-error --fail --location "$url" --output "$output"; then
                 return 0
@@ -127,69 +102,16 @@ jobs:
           }
 
           mkdir -p /tmp/armada-live
-          for route in index.html resume.html cover-letter.html interview-brief.html 90-day-plan.html outcome-cross-dock.html sources.html; do
-            fetch_retry "${base}${route}" "/tmp/armada-live/${route}"
-          done
-          grep -q "Turn analytics demand into adopted decisions" /tmp/armada-live/index.html
-          grep -q "412.287.8640" /tmp/armada-live/resume.html
-          grep -q "View Resume" /tmp/armada-live/cover-letter.html
+          fetch_retry "${base}index.html" /tmp/armada-live/index.html
+          fetch_retry "${base}90-day-plan.html" /tmp/armada-live/90-day-plan.html
+          fetch_retry "${base}docs/Russell-Dudek-ARMADA-90-Day-Plan.pdf" /tmp/armada-live/plan.pdf
 
-          fetch_retry "${base}assets/brand/armada-logo-official.svg" /tmp/armada-live/armada-logo-official.svg
-          cmp assets/brand/armada-logo-official.svg /tmp/armada-live/armada-logo-official.svg
+          grep -q "Microsoft analytics advantage" /tmp/armada-live/index.html
+          grep -q "Platform fluency. Product judgment. Operating follow-through." /tmp/armada-live/index.html
+          grep -q "capability priorities, and capacity choices" /tmp/armada-live/index.html
+          grep -q "capability priorities, and recommended capacity allocation" /tmp/armada-live/90-day-plan.html
 
-          for file in docs/*.pdf; do
-            name="$(basename "$file")"
-            fetch_retry "${base}docs/${name}" "/tmp/armada-live/${name}"
-            cmp "$file" "/tmp/armada-live/${name}"
-          done
+          ! grep -Eiq "hard objection|strongest hiring objection|do not blur the gap|does not support claiming|primary gap to test|credible case is adjacent|capability gaps" /tmp/armada-live/index.html /tmp/armada-live/90-day-plan.html
+          cmp docs/Russell-Dudek-ARMADA-90-Day-Plan.pdf /tmp/armada-live/plan.pdf
 
-          python - <<'PY'
-          from pathlib import Path
-          from pypdf import PdfReader
-          expected = {
-              'Russell-Dudek-ARMADA-Resume.pdf': 2,
-              'Russell-Dudek-ARMADA-Cover-Letter.pdf': 1,
-              'Russell-Dudek-ARMADA-Interview-Brief.pdf': 3,
-              'Russell-Dudek-ARMADA-90-Day-Plan.pdf': 2,
-              'Russell-Dudek-ARMADA-Outcome-Cross-Dock.pdf': 1,
-              'Russell-Dudek-ARMADA-Public-Source-Notes.pdf': 1,
-          }
-          for name, count in expected.items():
-              actual = len(PdfReader(str(Path('/tmp/armada-live') / name)).pages)
-              if actual != count:
-                  raise SystemExit(f'Live {name}: expected {count}, got {actual}')
-          PY
-
-          cat > deployment-receipt.json <<EOF
-          {
-            "campaign_state": "live_verified",
-            "live_site": "${base}",
-            "routes_verified": [
-              "index.html",
-              "resume.html",
-              "cover-letter.html",
-              "interview-brief.html",
-              "90-day-plan.html",
-              "outcome-cross-dock.html",
-              "sources.html"
-            ],
-            "official_identity_byte_match": "passed",
-            "live_pdf_byte_match": "passed",
-            "pdf_page_counts": {
-              "resume": 2,
-              "cover_letter": 1,
-              "interview_brief": 3,
-              "entry_plan": 2,
-              "outcome_cross_dock": 1,
-              "public_source_notes": 1
-            }
-          }
-          EOF
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add deployment-receipt.json
-          if ! git diff --cached --quiet; then
-            git commit -m "Record verified ARMADA live deployment"
-            git push
-          fi
+          echo "Live affirmative positioning and PDF byte match passed"

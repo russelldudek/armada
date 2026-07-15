@@ -1,0 +1,97 @@
+name: Build and deploy candidate vision
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Materialize campaign source
+        run: |
+          if compgen -G "campaign-source.part-*" > /dev/null; then
+            cat campaign-source.part-* > campaign-source.tar.gz.b64
+            base64 --decode campaign-source.tar.gz.b64 > campaign-source.tar.gz
+            tar -xzf campaign-source.tar.gz
+            rm campaign-source.tar.gz campaign-source.tar.gz.b64 campaign-source.part-*
+          fi
+
+      - name: Install PDF renderer
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install weasyprint==68.0 pypdf
+
+      - name: Retrieve official ARMADA identity
+        run: |
+          mkdir -p assets/brand
+          curl --fail --location --retry 3 \
+            https://www.armada.net/wp-content/themes/amd2024/public/images/logo-footer.3a20a9.svg \
+            --output assets/brand/armada-logo-official.svg
+          test -s assets/brand/armada-logo-official.svg
+
+      - name: Generate printable artifacts
+        run: python scripts/build_pdfs.py
+
+      - name: Verify PDF contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from pypdf import PdfReader
+          expected = {
+              'Russell-Dudek-ARMADA-Resume.pdf': 2,
+              'Russell-Dudek-ARMADA-Cover-Letter.pdf': 1,
+              'Russell-Dudek-ARMADA-Interview-Brief.pdf': 3,
+              'Russell-Dudek-ARMADA-90-Day-Plan.pdf': 2,
+              'Russell-Dudek-ARMADA-Outcome-Cross-Dock.pdf': 1,
+              'Russell-Dudek-ARMADA-Public-Source-Notes.pdf': 1,
+          }
+          for name, count in expected.items():
+              path = Path('docs') / name
+              actual = len(PdfReader(str(path)).pages)
+              if actual != count:
+                  raise SystemExit(f'{name}: expected {count} pages, got {actual}')
+              print(f'{name}: {actual} page(s)')
+          PY
+
+      - name: Commit materialized brand and PDFs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Materialize ARMADA brand asset and campaign PDFs"
+            git push
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload static site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

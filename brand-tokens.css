@@ -1,0 +1,18 @@
+:root {
+  /* Source-sampled from the locally preserved ARMADA identity reference. */
+  --brand-blue: #0457bb;
+  --brand-sky: #44a2e5;
+  --brand-lime: #a1db2a;
+  --brand-violet: #6259e8;
+  --brand-navy: #1439af;
+  --brand-teal: #085750;
+  --brand-ink: #111d33;
+  --brand-muted: #60708a;
+  --brand-paper: #f6f8fb;
+  --brand-white: #ffffff;
+  /* Candidate-original role-metaphor support colors. */
+  --dock-orange: #f0a33a;
+  --dock-red: #c94b5e;
+  --line: #d8e0eb;
+  --shadow: 0 20px 55px rgba(17,29,51,.12);
+}

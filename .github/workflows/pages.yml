@@ -95,3 +95,88 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify live routes and committed downloads
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          base="${PAGE_URL%/}/"
+          fetch_retry() {
+            url="$1"
+            output="$2"
+            for attempt in $(seq 1 30); do
+              if curl --silent --show-error --fail --location "$url" --output "$output"; then
+                return 0
+              fi
+              sleep 5
+            done
+            echo "Live verification failed for $url" >&2
+            return 1
+          }
+
+          mkdir -p /tmp/armada-live
+          for route in index.html resume.html cover-letter.html interview-brief.html 90-day-plan.html outcome-cross-dock.html sources.html; do
+            fetch_retry "${base}${route}" "/tmp/armada-live/${route}"
+          done
+          grep -q "Turn analytics demand into adopted decisions" /tmp/armada-live/index.html
+          grep -q "412.287.8640" /tmp/armada-live/resume.html
+          grep -q "View Resume" /tmp/armada-live/cover-letter.html
+
+          fetch_retry "${base}assets/brand/armada-logo-official.svg" /tmp/armada-live/armada-logo-official.svg
+          cmp assets/brand/armada-logo-official.svg /tmp/armada-live/armada-logo-official.svg
+
+          for file in docs/*.pdf; do
+            name="$(basename "$file")"
+            fetch_retry "${base}docs/${name}" "/tmp/armada-live/${name}"
+            cmp "$file" "/tmp/armada-live/${name}"
+          done
+
+          python - <<'PY'
+          from pathlib import Path
+          from pypdf import PdfReader
+          expected = {
+              'Russell-Dudek-ARMADA-Resume.pdf': 2,
+              'Russell-Dudek-ARMADA-Cover-Letter.pdf': 1,
+              'Russell-Dudek-ARMADA-Interview-Brief.pdf': 3,
+              'Russell-Dudek-ARMADA-90-Day-Plan.pdf': 2,
+              'Russell-Dudek-ARMADA-Outcome-Cross-Dock.pdf': 1,
+              'Russell-Dudek-ARMADA-Public-Source-Notes.pdf': 1,
+          }
+          for name, count in expected.items():
+              actual = len(PdfReader(str(Path('/tmp/armada-live') / name)).pages)
+              if actual != count:
+                  raise SystemExit(f'Live {name}: expected {count}, got {actual}')
+          PY
+
+          cat > deployment-receipt.json <<EOF
+          {
+            "campaign_state": "live_verified",
+            "live_site": "${base}",
+            "routes_verified": [
+              "index.html",
+              "resume.html",
+              "cover-letter.html",
+              "interview-brief.html",
+              "90-day-plan.html",
+              "outcome-cross-dock.html",
+              "sources.html"
+            ],
+            "official_identity_byte_match": "passed",
+            "live_pdf_byte_match": "passed",
+            "pdf_page_counts": {
+              "resume": 2,
+              "cover_letter": 1,
+              "interview_brief": 3,
+              "entry_plan": 2,
+              "outcome_cross_dock": 1,
+              "public_source_notes": 1
+            }
+          }
+          EOF
+
+          git add deployment-receipt.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Record verified ARMADA live deployment"
+            git push
+          fi

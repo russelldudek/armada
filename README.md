@@ -6,6 +6,8 @@ Independent candidate vision by Russell Dudek for ARMADA Supply Chain Solutions'
 
 Route data work to outcomes. Make the decision behind every data product explicit, choose a defensible Build / Validate / Sequence / Stop disposition, and manage the path through release and retained use.
 
+The campaign positions Microsoft analytics as a business-value platform: Power BI, Microsoft Fabric, automation, and AI become more consequential when product judgment, delivery discipline, and adoption ownership operate together.
+
 ## Public routes
 
 - `index.html`

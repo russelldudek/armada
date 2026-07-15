@@ -25,6 +25,7 @@ BANNED = [
     'test the adjacent evidence',
     'learning velocity rather than accept inflated wording',
     'platform overreach',
+    'capability gaps',
 ]
 
 combined = []
